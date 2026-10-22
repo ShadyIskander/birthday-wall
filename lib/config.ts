@@ -3,7 +3,7 @@
 export const NAME = "Nato";
 export const AGE = "23";
 export const MESSAGE = "Happy Birthday";
-export const FEATURED_PHOTO = "/featured.png";
+export const FEATURED_PHOTO = "/featured.jpeg";
 export const MAX_CAPTION = 80;
 export const MAX_FILE_BYTES = 4 * 1024 * 1024; // Vercel Functions accept ~4.5 MB bodies
 export const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
