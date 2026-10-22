@@ -151,7 +151,7 @@ export default function Dashboard() {
       <div className="absolute left-[3vw] top-[2vh] z-10 text-[11vh] font-bold leading-none">{NAME}</div>
 
       <div className="absolute left-[3vw] top-[15vh] h-[58vh]"><ScallopFrame src={FEATURED_PHOTO} /></div>
-      <div className="absolute left-[5vw] top-[74.5vh] flex w-[43.5vh] items-baseline justify-end gap-[2vw] text-right">
+      <div className="absolute left-[4vw] top-[74.5vh] flex w-[43.5vh] items-baseline justify-end gap-[2vw] text-right">
         <span className="text-[12vh] leading-none">{MESSAGE}</span>
         <span className="text-[14vh] leading-none">{AGE}</span>
       </div>
