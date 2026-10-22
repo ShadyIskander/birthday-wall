@@ -14,33 +14,51 @@ type Placed = { photo: Photo; x: number; y: number; w: number; rot: number; z: n
 // Small deterministic random so the collage doesn't reshuffle every time it refreshes.
 function rng(seed: number) {
   let a = (seed * 2654435761) >>> 0;
-  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // Card geometry: white border = 5% of width, photo = 90% of width, caption strip = 20% of width.
 const cardHeightPerWidth = (ratio: number) => 0.9 / ratio + 0.25;
 
-// Scatters photos loosely over the area: tilted, overlapping, never cropped.
+// Scatters photos in a randomized grid with only slight overlap and tilt.
 function scatter(photos: Photo[], ratios: Record<number, number>, W: number, H: number): Placed[] {
   const list = photos.filter((p) => ratios[p.id] !== undefined);
   if (!list.length || W < 50 || H < 50) return [];
+
   const n = list.length;
   const cols = Math.max(1, Math.round(Math.sqrt((n * W) / H)));
   const rows = Math.ceil(n / cols);
-  const cw = W / cols, ch = H / rows;
-  const order = list.map((_, i) => i).sort((i, j) => rng(list[i].id)() - rng(list[j].id)()); // shuffled cells
+  const cw = W / cols;
+  const ch = H / rows;
+
+  // Shuffle the grid cells deterministically so the arrangement remains stable between refreshes.
+  const seed = list.reduce((value, photo) => Math.imul(value ^ photo.id, 16777619) >>> 0, 2166136261);
+  const random = rng(seed);
+  const order = Array.from({ length: n }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
   return list.map((photo, k) => {
     const r = rng(photo.id);
     const ratio = ratios[photo.id];
-    const maxW = Math.min(cw * 1.3, W * 0.32), maxH = Math.min(ch * 1.25, H * 0.62); // a bit bigger than the cell -> neighbours overlap
+    const maxW = Math.min(cw * 1.05, W * 0.30);
+    const maxH = Math.min(ch * 1.05, H * 0.55);
     const w = Math.min(maxW, maxH / cardHeightPerWidth(ratio));
     const h = w * cardHeightPerWidth(ratio);
     const cell = order[k];
-    const cx = (cell % cols + 0.5) * cw + (r() - 0.5) * cw * 0.35;
-    const cy = (Math.floor(cell / cols) + 0.5) * ch + (r() - 0.5) * ch * 0.35;
+    const cx = (cell % cols + 0.5) * cw + (r() - 0.5) * cw * 0.08;
+    const cy = (Math.floor(cell / cols) + 0.5) * ch + (r() - 0.5) * ch * 0.08;
     const x = Math.min(Math.max(cx - w / 2, 0), Math.max(0, W - w));
     const y = Math.min(Math.max(cy - h / 2, 0), Math.max(0, H - h));
-    return { photo, x, y, w, rot: (r() - 0.5) * 14, z: n - k, ratio }; // newest (first) on top
+    return { photo, x, y, w, rot: (r() - 0.5) * 5, z: n - k, ratio };
   });
 }
 
@@ -50,8 +68,12 @@ function ScallopFrame({ src }: { src: string }) {
     const out: { x: number; y: number }[] = [];
     const step = r * 1.55;
     const jig = (i: number) => Math.sin(i * 12.9898) * 1.5; // slight hand-drawn wobble
-    for (let x = r, i = 0; x <= W - r + 1; x += step, i++) { out.push({ x, y: r + jig(i) }, { x, y: H - r + jig(i + 7) }); }
-    for (let y = r + step, i = 0; y <= H - r - step + 1; y += step, i++) { out.push({ x: r + jig(i + 3), y }, { x: W - r + jig(i + 5), y }); }
+    for (let x = r, i = 0; x <= W - r + 1; x += step, i++) {
+      out.push({ x, y: r + jig(i) }, { x, y: H - r + jig(i + 7) });
+    }
+    for (let y = r + step, i = 0; y <= H - r - step + 1; y += step, i++) {
+      out.push({ x: r + jig(i + 3), y }, { x: W - r + jig(i + 5), y });
+    }
     return out;
   }, []);
   return (
@@ -129,7 +151,7 @@ export default function Dashboard() {
       <div className="absolute left-[3vw] top-[2vh] z-10 text-[11vh] font-bold leading-none">{NAME}</div>
 
       <div className="absolute left-[3vw] top-[15vh] h-[58vh]"><ScallopFrame src={FEATURED_PHOTO} /></div>
-      <div className="absolute bottom-[3vh] left-[3vw] flex items-baseline gap-[2vw]">
+      <div className="absolute bottom-[3vh] right-[3vw] z-10 flex items-baseline justify-end gap-[2vw] text-right">
         <span className="text-[8vh] font-bold leading-none">{MESSAGE}</span>
         <span className="text-[14vh] font-bold leading-none">{AGE}</span>
       </div>
@@ -159,7 +181,7 @@ export default function Dashboard() {
       </section>
 
       {origin && (
-        <div className="absolute bottom-[3vh] right-[2.5vw] z-10 flex flex-col items-center gap-[1vh]">
+        <div className="absolute bottom-[3vh] left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-[1vh]">
           <div className="bg-white p-[1.2vh]"><QRCodeSVG value={`${origin}/submit`} size={200} level="M" className="!h-[22vh] !w-[22vh]" /></div>
           <span className="text-[3.2vh] font-bold">Scan to add your photo</span>
         </div>
