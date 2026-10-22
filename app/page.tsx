@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { AGE, FEATURED_PHOTO, MESSAGE, NAME } from "@/lib/config";
 
@@ -7,19 +7,53 @@ type Photo = { id: number; url: string; caption: string };
 
 const POLL_MS = 5000;
 const PAGE_MS = 9000;
-// Positions (% of collage area) and tilt for each polaroid on a page.
-const SLOTS = [
-  { top: 2, left: 4, rot: -5 }, { top: 4, left: 35, rot: 3 }, { top: 2, left: 66, rot: -3 },
-  { top: 30, left: 18, rot: 4 }, { top: 32, left: 50, rot: -4 },
-  { top: 58, left: 3, rot: -3 }, { top: 60, left: 35, rot: 5 },
-];
+const PAD = 10;
+const GAP = 16;
+const CAPTION_H = 64;
+
+type Card = { photo: Photo; w: number; h: number };
+type Row = { cards: Card[]; height: number };
+
+function layoutPages(photos: Photo[], ratios: Record<number, number>, W: number, H: number): Row[][] {
+  if (W < 50 || H < 50) return [];
+  const target = Math.max(120, (H - GAP) / 2 - PAD - CAPTION_H);
+  const rows: Row[] = [];
+  let cur: Photo[] = [];
+  const fitH = (list: Photo[]) => {
+    const sumA = list.reduce((a, p) => a + ratios[p.id], 0);
+    return (W - list.length * 2 * PAD - (list.length - 1) * GAP) / sumA;
+  };
+  const build = (list: Photo[]): Row => {
+    const h = Math.min(fitH(list), target);
+    return {
+      cards: list.map((p) => ({ photo: p, w: ratios[p.id] * h + 2 * PAD, h })),
+      height: h + PAD + CAPTION_H,
+    };
+  };
+  for (const p of photos) {
+    if (ratios[p.id] === undefined) continue;
+    cur.push(p);
+    if (fitH(cur) <= target) { rows.push(build(cur)); cur = []; }
+  }
+  if (cur.length) rows.push(build(cur));
+
+  const pages: Row[][] = [];
+  let page: Row[] = [], used = 0;
+  for (const r of rows) {
+    const need = r.height + (page.length ? GAP : 0);
+    if (page.length && used + need > H) { pages.push(page); page = []; used = 0; }
+    page.push(r); used += r.height + (page.length > 1 ? GAP : 0);
+  }
+  if (page.length) pages.push(page);
+  return pages;
+}
 
 function ScallopFrame({ src }: { src: string }) {
   const W = 600, H = 800, r = 20;
   const circles = useMemo(() => {
     const out: { x: number; y: number }[] = [];
     const step = r * 1.55;
-    const jig = (i: number) => Math.sin(i * 12.9898) * 1.5; // slight hand-drawn wobble
+    const jig = (i: number) => Math.sin(i * 12.9898) * 1.5;
     for (let x = r, i = 0; x <= W - r + 1; x += step, i++) { out.push({ x, y: r + jig(i) }, { x, y: H - r + jig(i + 7) }); }
     for (let y = r + step, i = 0; y <= H - r - step + 1; y += step, i++) { out.push({ x: r + jig(i + 3), y }, { x: W - r + jig(i + 5), y }); }
     return out;
@@ -40,7 +74,9 @@ export default function Dashboard() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [page, setPage] = useState(0);
   const [origin, setOrigin] = useState("");
-  const perPage = SLOTS.length;
+  const [ratios, setRatios] = useState<Record<number, number>>({});
+  const [area, setArea] = useState({ w: 0, h: 0 });
+  const areaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -52,7 +88,6 @@ export default function Dashboard() {
         if (!res.ok) return;
         const data: Photo[] = await res.json();
         if (!alive) return;
-        // New photo arrived -> jump back to page 1 so it is seen straight away.
         setPhotos((prev) => { if (data.length > prev.length) setPage(0); return data; });
       } catch { /* keep showing what we have */ }
     };
@@ -61,14 +96,34 @@ export default function Dashboard() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
-  const pages = Math.max(1, Math.ceil(photos.length / perPage));
+  useEffect(() => {
+    photos.forEach((p) => {
+      if (ratios[p.id] !== undefined) return;
+      const img = new Image();
+      const done = (r: number) => setRatios((prev) => (prev[p.id] === undefined ? { ...prev, [p.id]: r } : prev));
+      img.onload = () => done(img.naturalWidth / img.naturalHeight || 1);
+      img.onerror = () => done(1);
+      img.src = p.url;
+    });
+  }, [photos, ratios]);
+
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setArea({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const wallPages = useMemo(() => layoutPages(photos, ratios, area.w, area.h - 36), [photos, ratios, area]);
+  const pages = Math.max(1, wallPages.length);
   useEffect(() => {
     if (pages < 2) return;
     const t = setInterval(() => setPage((p) => (p + 1) % pages), PAGE_MS);
     return () => clearInterval(t);
   }, [pages]);
 
-  const visible = photos.slice((page % pages) * perPage, (page % pages) * perPage + perPage);
+  const visibleRows = wallPages[page % pages] ?? [];
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-white">
@@ -80,24 +135,31 @@ export default function Dashboard() {
         <span className="text-[14vh] font-bold leading-none">{AGE}</span>
       </div>
 
-      <section className="absolute right-0 top-0 h-full w-[56vw]">
+      <section className="absolute right-0 top-0 h-[68vh] w-[68vw] p-[1.2vw]">
         {photos.length === 0 && (
           <p className="absolute inset-0 flex items-center justify-center text-center text-[6vh] text-neutral-500">
             Scan the code to add the first photo
           </p>
         )}
-        {visible.map((p, i) => (
-          <figure key={p.id} className="absolute w-[28vh] bg-white p-[1.3vh] pb-0 shadow-[0_4px_14px_rgba(0,0,0,.28)] ring-1 ring-neutral-300"
-            style={{ top: `${SLOTS[i].top}%`, left: `${SLOTS[i].left}%`, transform: `rotate(${SLOTS[i].rot}deg)` }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={p.url} alt={p.caption} className="aspect-square w-full object-cover" />
-            <figcaption className="flex h-[8vh] items-center justify-center overflow-hidden text-center text-[2.8vh] font-bold leading-tight">
-              {p.caption}
-            </figcaption>
-          </figure>
-        ))}
+        <div ref={areaRef} className="flex h-full w-full flex-col" style={{ gap: GAP }}>
+          {visibleRows.map((row, ri) => (
+            <div key={ri} className="flex" style={{ gap: GAP }}>
+              {row.cards.map((c) => (
+                <figure key={c.photo.id} className="shrink-0 bg-white shadow-[0_3px_10px_rgba(0,0,0,.25)] ring-1 ring-neutral-300"
+                  style={{ width: c.w, padding: `${PAD}px ${PAD}px 0` }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.photo.url} alt={c.photo.caption} style={{ width: "100%", height: c.h }} className="block object-cover" />
+                  <figcaption className="flex items-center justify-center overflow-hidden text-center text-[2.4vh] font-bold leading-[1.05]"
+                    style={{ height: CAPTION_H }}>
+                    <span className="line-clamp-2 px-1">{c.photo.caption}</span>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          ))}
+        </div>
         {pages > 1 && (
-          <div className="absolute bottom-[2vh] left-[40%] text-[2.4vh] text-neutral-400">{(page % pages) + 1} / {pages}</div>
+          <div className="absolute bottom-[0.5vh] left-1/2 text-[2.4vh] text-neutral-400">{(page % pages) + 1} / {pages}</div>
         )}
       </section>
 
