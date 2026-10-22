@@ -151,11 +151,9 @@ export default function Dashboard() {
       <div className="absolute left-[3vw] top-[2vh] z-10 text-[11vh] font-bold leading-none">{NAME}</div>
 
       <div className="absolute left-[3vw] top-[15vh] h-[58vh]"><ScallopFrame src={FEATURED_PHOTO} /></div>
-      <div className="absolute left-[3.5vw] top-[74vh] flex w-[43.5vh] items-baseline justify-end gap-[2vw] text-right">
-  <span className="text-[12vh] leading-none">{MESSAGE}</span>
-  <span className="text-[14vh] leading-none">{AGE}</span>
-</div>
-
+      <div className="absolute left-[3.5vw] top-[74.5vh] flex w-[43.5vh] items-baseline justify-end gap-[2vw] text-right">
+        <span className="text-[12vh] leading-none">{MESSAGE}</span>
+        <span className="text-[14vh] leading-none">{AGE}</span>
       </div>
 
       <section className="absolute right-0 top-0 h-[68vh] w-[68vw] p-[1.2vw]">
@@ -183,7 +181,7 @@ export default function Dashboard() {
       </section>
 
       {origin && (
-        <div className="absolute bottom-[3vh] left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-[1vh]">
+        <div className="absolute bottom-[3vh] right-[2.5vw] z-10 flex flex-col items-center gap-[1vh]">
           <div className="bg-white p-[1.2vh]"><QRCodeSVG value={`${origin}/submit`} size={200} level="M" className="!h-[22vh] !w-[22vh]" /></div>
           <span className="text-[3.2vh] font-bold">Scan to add your photo</span>
         </div>
