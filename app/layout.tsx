@@ -1,8 +1,13 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import { Caveat } from "next/font/google";
+import localFont from "next/font/local";
 
-const caveat = Caveat({ subsets: ["latin"], weight: ["500", "700"] });
+const badScript = localFont({
+  src: "./fonts/BadScript-Regular.ttf",
+  display: "swap",
+  weight: "400",
+  style: "normal",
+});
 
 export const metadata: Metadata = { title: "Birthday photos" };
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
@@ -10,7 +15,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={caveat.className}>{children}</body>
+      <body className={badScript.className}>{children}</body>
     </html>
   );
 }
