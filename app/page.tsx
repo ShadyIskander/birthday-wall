@@ -7,45 +7,41 @@ type Photo = { id: number; url: string; caption: string };
 
 const POLL_MS = 5000;
 const PAGE_MS = 9000;
-const PAD = 10;
-const GAP = 16;
-const CAPTION_H = 64;
+const PER_PAGE = 8;
 
-type Card = { photo: Photo; w: number; h: number };
-type Row = { cards: Card[]; height: number };
+type Placed = { photo: Photo; x: number; y: number; w: number; rot: number; z: number; ratio: number };
 
-function layoutPages(photos: Photo[], ratios: Record<number, number>, W: number, H: number): Row[][] {
-  if (W < 50 || H < 50) return [];
-  const target = Math.max(120, (H - GAP) / 2 - PAD - CAPTION_H);
-  const rows: Row[] = [];
-  let cur: Photo[] = [];
-  const fitH = (list: Photo[]) => {
-    const sumA = list.reduce((a, p) => a + ratios[p.id], 0);
-    return (W - list.length * 2 * PAD - (list.length - 1) * GAP) / sumA;
-  };
-  const build = (list: Photo[]): Row => {
-    const h = Math.min(fitH(list), target);
-    return {
-      cards: list.map((p) => ({ photo: p, w: ratios[p.id] * h + 2 * PAD, h })),
-      height: h + PAD + CAPTION_H,
-    };
-  };
-  for (const p of photos) {
-    if (ratios[p.id] === undefined) continue;
-    cur.push(p);
-    if (fitH(cur) <= target) { rows.push(build(cur)); cur = []; }
-  }
-  if (cur.length) rows.push(build(cur));
+// Small deterministic random so the collage doesn't reshuffle every time it refreshes.
+function rng(seed: number) {
+  let a = (seed * 2654435761) >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
 
-  const pages: Row[][] = [];
-  let page: Row[] = [], used = 0;
-  for (const r of rows) {
-    const need = r.height + (page.length ? GAP : 0);
-    if (page.length && used + need > H) { pages.push(page); page = []; used = 0; }
-    page.push(r); used += r.height + (page.length > 1 ? GAP : 0);
-  }
-  if (page.length) pages.push(page);
-  return pages;
+// Card geometry: white border = 5% of width, photo = 90% of width, caption strip = 20% of width.
+const cardHeightPerWidth = (ratio: number) => 0.9 / ratio + 0.25;
+
+// Scatters photos loosely over the area: tilted, overlapping, never cropped.
+function scatter(photos: Photo[], ratios: Record<number, number>, W: number, H: number): Placed[] {
+  const list = photos.filter((p) => ratios[p.id] !== undefined);
+  if (!list.length || W < 50 || H < 50) return [];
+  const n = list.length;
+  const cols = Math.max(1, Math.round(Math.sqrt((n * W) / H)));
+  const rows = Math.ceil(n / cols);
+  const cw = W / cols, ch = H / rows;
+  const order = list.map((_, i) => i).sort((i, j) => rng(list[i].id)() - rng(list[j].id)()); // shuffled cells
+  return list.map((photo, k) => {
+    const r = rng(photo.id);
+    const ratio = ratios[photo.id];
+    const maxW = Math.min(cw * 1.3, W * 0.32), maxH = Math.min(ch * 1.25, H * 0.62); // a bit bigger than the cell -> neighbours overlap
+    const w = Math.min(maxW, maxH / cardHeightPerWidth(ratio));
+    const h = w * cardHeightPerWidth(ratio);
+    const cell = order[k];
+    const cx = (cell % cols + 0.5) * cw + (r() - 0.5) * cw * 0.35;
+    const cy = (Math.floor(cell / cols) + 0.5) * ch + (r() - 0.5) * ch * 0.35;
+    const x = Math.min(Math.max(cx - w / 2, 0), Math.max(0, W - w));
+    const y = Math.min(Math.max(cy - h / 2, 0), Math.max(0, H - h));
+    return { photo, x, y, w, rot: (r() - 0.5) * 14, z: n - k, ratio }; // newest (first) on top
+  });
 }
 
 function ScallopFrame({ src }: { src: string }) {
@@ -53,7 +49,7 @@ function ScallopFrame({ src }: { src: string }) {
   const circles = useMemo(() => {
     const out: { x: number; y: number }[] = [];
     const step = r * 1.55;
-    const jig = (i: number) => Math.sin(i * 12.9898) * 1.5;
+    const jig = (i: number) => Math.sin(i * 12.9898) * 1.5; // slight hand-drawn wobble
     for (let x = r, i = 0; x <= W - r + 1; x += step, i++) { out.push({ x, y: r + jig(i) }, { x, y: H - r + jig(i + 7) }); }
     for (let y = r + step, i = 0; y <= H - r - step + 1; y += step, i++) { out.push({ x: r + jig(i + 3), y }, { x: W - r + jig(i + 5), y }); }
     return out;
@@ -88,6 +84,7 @@ export default function Dashboard() {
         if (!res.ok) return;
         const data: Photo[] = await res.json();
         if (!alive) return;
+        // New photo arrived -> jump back to page 1 so it is seen straight away.
         setPhotos((prev) => { if (data.length > prev.length) setPage(0); return data; });
       } catch { /* keep showing what we have */ }
     };
@@ -96,6 +93,7 @@ export default function Dashboard() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Learn each photo's real shape so nothing is ever cropped.
   useEffect(() => {
     photos.forEach((p) => {
       if (ratios[p.id] !== undefined) return;
@@ -107,6 +105,7 @@ export default function Dashboard() {
     });
   }, [photos, ratios]);
 
+  // Measure the photo area.
   useEffect(() => {
     const el = areaRef.current;
     if (!el) return;
@@ -115,15 +114,15 @@ export default function Dashboard() {
     return () => ro.disconnect();
   }, []);
 
-  const wallPages = useMemo(() => layoutPages(photos, ratios, area.w, area.h - 36), [photos, ratios, area]);
-  const pages = Math.max(1, wallPages.length);
+  const pages = Math.max(1, Math.ceil(photos.length / PER_PAGE));
   useEffect(() => {
     if (pages < 2) return;
     const t = setInterval(() => setPage((p) => (p + 1) % pages), PAGE_MS);
     return () => clearInterval(t);
   }, [pages]);
 
-  const visibleRows = wallPages[page % pages] ?? [];
+  const visible = photos.slice((page % pages) * PER_PAGE, (page % pages) * PER_PAGE + PER_PAGE);
+  const placed = useMemo(() => scatter(visible, ratios, area.w, area.h), [visible, ratios, area]);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-white">
@@ -141,21 +140,17 @@ export default function Dashboard() {
             Scan the code to add the first photo
           </p>
         )}
-        <div ref={areaRef} className="flex h-full w-full flex-col" style={{ gap: GAP }}>
-          {visibleRows.map((row, ri) => (
-            <div key={ri} className="flex" style={{ gap: GAP }}>
-              {row.cards.map((c) => (
-                <figure key={c.photo.id} className="shrink-0 bg-white shadow-[0_3px_10px_rgba(0,0,0,.25)] ring-1 ring-neutral-300"
-                  style={{ width: c.w, padding: `${PAD}px ${PAD}px 0` }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={c.photo.url} alt={c.photo.caption} style={{ width: "100%", height: c.h }} className="block object-cover" />
-                  <figcaption className="flex items-center justify-center overflow-hidden text-center text-[2.4vh] font-bold leading-[1.05]"
-                    style={{ height: CAPTION_H }}>
-                    <span className="line-clamp-2 px-1">{c.photo.caption}</span>
-                  </figcaption>
-                </figure>
-              ))}
-            </div>
+        <div ref={areaRef} className="relative h-full w-full">
+          {placed.map((c) => (
+            <figure key={c.photo.id} className="absolute bg-white shadow-[0_4px_14px_rgba(0,0,0,.3)] ring-1 ring-neutral-300"
+              style={{ left: c.x, top: c.y, width: c.w, padding: `${c.w * 0.05}px ${c.w * 0.05}px 0`, transform: `rotate(${c.rot}deg)`, zIndex: c.z }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={c.photo.url} alt={c.photo.caption} style={{ width: "100%", aspectRatio: String(c.ratio) }} className="block" />
+              <figcaption className="flex items-center justify-center overflow-hidden text-center font-bold"
+                style={{ height: c.w * 0.2, fontSize: c.w * 0.075, lineHeight: 1.05 }}>
+                <span className="line-clamp-2 px-1">{c.photo.caption}</span>
+              </figcaption>
+            </figure>
           ))}
         </div>
         {pages > 1 && (
