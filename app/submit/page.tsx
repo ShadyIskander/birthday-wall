@@ -63,7 +63,7 @@ export default function Submit() {
       {preview ? (
         <div className="bg-white p-3 pb-0 shadow-md ring-1 ring-neutral-300">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Preview" className="aspect-square w-full object-cover" />
+          <img src={preview} alt="Preview" className="block max-h-[60vh] w-full object-contain" />
           <div className="h-10" />
         </div>
       ) : (
